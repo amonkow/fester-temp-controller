@@ -6,9 +6,11 @@
 #define TE_POL_OUT 7
 #define AC_CONTROL 9
 #define TE_PWM_IN 16
+
 // Invervals in microseconds
 // AC CONTROL must be fast enough to detect 120Hz cycle edge
 #define AC_CONTROL_INTERVAL 10
+
 // Interval of calculating new PID parameters
 // CONSIDER TIME CONSTANTS OF SENSORS WHEN ADJUSTING
 #define PID_INTERVAL 100000
@@ -16,6 +18,7 @@
 
 // Digital filter timeconstant in microseconds
 #define ANALOG_TIME_CONSTANT 2000000
+
 // Number of calculations to smooth, 5 is probably sufficient 5=1<<5 readings / time-constant period
 #define ANALOG_TEMP_SMOOTHING 5
 
@@ -33,6 +36,7 @@ struct DAT {
   int tmax;
   int tinc;
 };
+
 // Resistance values in for tmin to tmax in tinc increments
 // Units are R * 1<<16/Rref
 // Temp units arbitrary, suggest C*1e3
@@ -46,13 +50,17 @@ DAT T5 = {A8, 0, 0, 0, NTC805R, NELEMS(NTC805R), 0, 150000, 5000};
 DAT T6 = {A9, 0, 0, 0, NTC805R, NELEMS(NTC805R), 0, 150000, 5000};
 DAT A_CHAN[] = {T1, T2, T3, T4, T5, T6};
 #define NCHANS 6
+
 struct TIME {
   uint tPrev;
   uint tInt;
 };
+
 TIME T_AC_SENSE = {0, AC_CONTROL_INTERVAL};
 TIME T_ANALOG_READ = {0, ANALOG_TIME_CONSTANT / (1<<ANALOG_TEMP_SMOOTHING)};
 TIME T_PID_CALC = {0, PID_INTERVAL};
+uint current_time;
+
 struct PID {
   int Kp;
   int Ki;
@@ -60,6 +68,15 @@ struct PID {
   int interr;
   int prev_err;
 };
+
+boolean timeout_expired(TIME t) {
+  if (current_time - t.tPrev >= t.tInt) {
+    t.tPrev = current_time;
+    return true;
+  }
+
+  return false; 
+}
 
 void setup() {
   // put your setup code here, to run once:
@@ -79,24 +96,28 @@ void setup() {
   
   Serial.begin(9600);
   long start_time = micros();
+  current_time = micros();
 }
 
 void loop() {
   // Only run individual tasks on appropriate individual 
   // roll-over safe?
-  uint current_time = micros();
+  current_time = micros();
+
   // Analog read task
-  if (current_time - T_ANALOG_READ.tPrev >= T_ANALOG_READ.tInt) {
+  if (timeout_expired(T_ANALOG_READ)) {
     updateAnalog();
     T_ANALOG_READ.tPrev = current_time;
   }
-  //AC control task
-  if (current_time - T_AC_SENSE.tPrev >= T_AC_SENSE.tInt) {
+
+  // AC control task
+  if (timeout_expired(T_AC_SENSE)) {
     ac_line_sense();
     T_AC_SENSE.tPrev = current_time;
   }
-  //PID calculation task
-  if (current_time - T_PID_CALC.tPrev >= T_PID_CALC.tInt) {
+
+  // PID calculation task
+  if (timeout_expired(T_PID_CALC.tPrev)) {
     calcTemps();
     for (int i=0; i<NCHANS; i++) {
       Serial.print("Analog Channel ");
@@ -108,9 +129,10 @@ void loop() {
       Serial.print(" : T=");
       Serial.println(float(A_CHAN[i].temp)/1000);
     }
+
     T_PID_CALC.tPrev = current_time;
+
     while (Serial.available()) {
-      
     }
       
     analogWrite(TE_PWM, 216);
