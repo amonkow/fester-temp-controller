@@ -1,4 +1,6 @@
+
 // PIN DEFINITIONS
+
 #define TE_PWM 3
 #define FAN_PWM 4
 #define PWR_OK 5
@@ -56,10 +58,14 @@ struct TIME {
   uint tInt;
 };
 
+#define AC_SENSE 1
+#define ANALOG_READ 2
+#define PID_CALC 3
+
 TIME T_AC_SENSE = {0, AC_CONTROL_INTERVAL};
 TIME T_ANALOG_READ = {0, ANALOG_TIME_CONSTANT / (1<<ANALOG_TEMP_SMOOTHING)};
 TIME T_PID_CALC = {0, PID_INTERVAL};
-uint current_time;
+int current_time;
 
 struct PID {
   int Kp;
@@ -69,12 +75,26 @@ struct PID {
   int prev_err;
 };
 
-boolean timeout_expired(TIME t) {
-  if (current_time - t.tPrev >= t.tInt) {
-    t.tPrev = current_time;
-    return true;
-  }
+boolean timeout_expired(int which) {
+  switch (which) {
+    case AC_SENSE:
+      if (current_time - T_AC_SENSE.tPrev >= T_AC_SENSE.tInt) {
+        T_AC_SENSE.tPrev = current_time;
+        return true;
+      }
 
+    case ANALOG_READ:
+      if (current_time - T_ANALOG_READ.tPrev >= T_ANALOG_READ.tInt) {
+        T_ANALOG_READ.tPrev = current_time;
+        return true;
+      }
+
+    case PID_CALC:
+      if (current_time - T_PID_CALC.tPrev >= T_PID_CALC.tInt) {
+        T_PID_CALC.tPrev = current_time;
+        return true;
+      }
+  }
   return false; 
 }
 
@@ -95,7 +115,6 @@ void setup() {
   }
   
   Serial.begin(9600);
-  long start_time = micros();
   current_time = micros();
 }
 
@@ -105,19 +124,17 @@ void loop() {
   current_time = micros();
 
   // Analog read task
-  if (timeout_expired(T_ANALOG_READ)) {
+  if (timeout_expired(ANALOG_READ)) {
     updateAnalog();
-    T_ANALOG_READ.tPrev = current_time;
   }
 
   // AC control task
-  if (timeout_expired(T_AC_SENSE)) {
+  if (timeout_expired(AC_SENSE)) {
     ac_line_sense();
-    T_AC_SENSE.tPrev = current_time;
   }
 
   // PID calculation task
-  if (timeout_expired(T_PID_CALC.tPrev)) {
+  if (timeout_expired(PID_CALC)) {
     calcTemps();
     for (int i=0; i<NCHANS; i++) {
       Serial.print("Analog Channel ");
@@ -129,8 +146,6 @@ void loop() {
       Serial.print(" : T=");
       Serial.println(float(A_CHAN[i].temp)/1000);
     }
-
-    T_PID_CALC.tPrev = current_time;
 
     while (Serial.available()) {
     }
