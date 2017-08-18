@@ -75,6 +75,15 @@ struct PID {
   int prev_err;
 };
 
+/* AC sense variables */
+float count_on_average = 0;
+float count_off_average = 0;
+int count_on = 0;
+int count_off = 0;
+int count_weight = 100;
+boolean count_was_high = false;
+
+
 boolean timeout_expired(int which) {
   switch (which) {
     case AC_SENSE:
@@ -192,6 +201,23 @@ void calcTemps() {
 }
 
 void ac_line_sense() {
-  int i = 0;
+  if (digitalRead(AC_LINE_SENSE)) {
+    count_on++;
+    count_was_high = true;
+  } else {
+    count_off++;
+    
+    /* We average the values when going from high to low */
+    if (count_was_high) {
+      count_on_average += (((float)count_on) - count_on_average) / count_weight;
+      count_off_average += (((float)count_off) - count_off_average) / count_weight;
+      
+      count_on = 0;
+      count_off = 0;
+      
+      Serial.printf("AC Line Sense: On=%f | Off=%f | On:Off=%f\n", count_on_average, count_off_average, count_on_average / count_off_average);
+    }
+    count_was_high = false;
+  }
 }
 
